@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import * as nodePath from 'node:path';
 import { bufferWatchEvents } from '~/utils/buffer';
 import { WORK_DIR } from '~/utils/constants';
-import { computeFileModifications } from '~/utils/diff';
+import { computeFileModifications, diffFiles } from '~/utils/diff';
 import { createScopedLogger } from '~/utils/logger';
 import { unreachable } from '~/utils/unreachable';
 import { acquireLock, releaseLock } from '~/lib/stores/fileLock';
@@ -97,6 +97,16 @@ export class FilesStore {
 
       if (!oldContent) {
         unreachable('Expected content to be defined');
+      }
+
+      // Check for conflicts before acquiring lock
+      const currentContent = (await webcontainer.fs.readFile(relativePath, 'utf-8')).toString();
+
+      if (currentContent !== oldContent) {
+        const diff = diffFiles(filePath, oldContent, currentContent);
+        throw new Error(
+          `File ${filePath} has been modified externally. Please refresh and merge changes.\n\nChanges:\n${diff}`,
+        );
       }
 
       // Acquire lock before writing
