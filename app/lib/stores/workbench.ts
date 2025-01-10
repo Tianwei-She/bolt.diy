@@ -192,12 +192,28 @@ export class WorkbenchStore {
       return;
     }
 
-    await this.#filesStore.saveFile(filePath, document.value);
+    try {
+      await this.#filesStore.saveFile(filePath, document.value);
 
-    const newUnsavedFiles = new Set(this.unsavedFiles.get());
-    newUnsavedFiles.delete(filePath);
+      const newUnsavedFiles = new Set(this.unsavedFiles.get());
+      newUnsavedFiles.delete(filePath);
 
-    this.unsavedFiles.set(newUnsavedFiles);
+      this.unsavedFiles.set(newUnsavedFiles);
+    } catch (error) {
+      if (error instanceof Error) {
+        const firstLine = error.message.split('\n')[0];
+        const isLockError = firstLine.includes('Cannot acquire lock');
+
+        this.actionAlert.set({
+          type: 'error',
+          title: isLockError ? 'File Locked' : 'File Save Failed',
+          description: firstLine,
+          content: error.message,
+        });
+
+        throw error; // Re-throw to maintain existing error handling
+      }
+    }
   }
 
   async saveCurrentDocument() {
