@@ -2,12 +2,14 @@ import type { PathWatcherEvent, WebContainer } from '@webcontainer/api';
 import { getEncoding } from 'istextorbinary';
 import { map, type MapStore } from 'nanostores';
 import { Buffer } from 'node:buffer';
+import { randomUUID } from 'node:crypto';
 import * as nodePath from 'node:path';
 import { bufferWatchEvents } from '~/utils/buffer';
 import { WORK_DIR } from '~/utils/constants';
 import { computeFileModifications } from '~/utils/diff';
 import { createScopedLogger } from '~/utils/logger';
 import { unreachable } from '~/utils/unreachable';
+import { acquireLock, releaseLock } from '~/lib/stores/fileLock';
 
 const logger = createScopedLogger('FilesStore');
 
@@ -82,6 +84,7 @@ export class FilesStore {
 
   async saveFile(filePath: string, content: string) {
     const webcontainer = await this.#webcontainer;
+    const lockOwner = `session-${randomUUID()}`;
 
     try {
       const relativePath = nodePath.relative(webcontainer.workdir, filePath);
@@ -96,16 +99,26 @@ export class FilesStore {
         unreachable('Expected content to be defined');
       }
 
-      await webcontainer.fs.writeFile(relativePath, content);
-
-      if (!this.#modifiedFiles.has(filePath)) {
-        this.#modifiedFiles.set(filePath, oldContent);
+      // Acquire lock before writing
+      if (!acquireLock(filePath, lockOwner)) {
+        throw new Error(`Cannot acquire lock for ${filePath}. File is being edited by another user.`);
       }
 
-      // we immediately update the file and don't rely on the `change` event coming from the watcher
-      this.files.setKey(filePath, { type: 'file', content, isBinary: false });
+      try {
+        await webcontainer.fs.writeFile(relativePath, content);
 
-      logger.info('File updated');
+        if (!this.#modifiedFiles.has(filePath)) {
+          this.#modifiedFiles.set(filePath, oldContent);
+        }
+
+        // we immediately update the file and don't rely on the `change` event coming from the watcher
+        this.files.setKey(filePath, { type: 'file', content, isBinary: false });
+
+        logger.info('File updated');
+      } finally {
+        // Always release the lock, even if the write fails
+        releaseLock(filePath, lockOwner);
+      }
     } catch (error) {
       logger.error('Failed to update file content\n\n', error);
 
