@@ -109,6 +109,8 @@ Let's get you up and running with the stable version of Bolt.DIY!
 
 Before you begin, you'll need to install two important pieces of software:
 
+> Note: This project uses pnpm as its package manager. npm or yarn are not supported.
+
 ### Install Node.js
 
 Node.js is required to run the application.
